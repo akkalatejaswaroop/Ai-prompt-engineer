@@ -78,7 +78,7 @@ You must respond in the specified JSON format.`;
   } catch (error) {
     console.error("Error in serverless function:", error);
     const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
-    return new Response(JSON.stringify({ error: Server error: ${errorMessage} }), {
+    return new Response(JSON.stringify({ error: `Server error: ${errorMessage}` }), {
       status: 500,
       headers,
     });
