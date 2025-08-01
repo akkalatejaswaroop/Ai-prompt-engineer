@@ -4,43 +4,50 @@ import OpenAI from "openai";
 
 const openai = new OpenAI({
   apiKey: process.env.PERPLEXITY_API_KEY,
-  baseURL: "https://api.perplexity.ai"
+  baseURL: "https://api.perplexity.ai",
 });
 
 export default async function handler(req: Request): Promise<Response> {
   const headers = {
-    'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': '*'
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Origin": "*",
   };
 
-  // Handle CORS preflight
-  if (req.method === 'OPTIONS') {
+  // Handle CORS preflight requests
+  if (req.method === "OPTIONS") {
     return new Response(null, {
       status: 204,
       headers: {
         ...headers,
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type',
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
       },
     });
   }
 
-  if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method Not Allowed' }), {
+  // Only POST method allowed
+  if (req.method !== "POST") {
+    return new Response(JSON.stringify({ error: "Method Not Allowed" }), {
       status: 405,
       headers,
     });
   }
 
+  // Check if API key is set
   if (!process.env.PERPLEXITY_API_KEY) {
-    return new Response(JSON.stringify({
-      error: 'PERPLEXITY_API_KEY environment variable is not set on the server.'
-    }), {
-      status: 500,
-      headers,
-    });
+    return new Response(
+      JSON.stringify({
+        error:
+          "PERPLEXITY_API_KEY environment variable is not set on the server.",
+      }),
+      {
+        status: 500,
+        headers,
+      }
+    );
   }
 
+  // Define the system prompt instructions
   const systemInstruction = `You are a world-class AI Prompt Engineer. Your purpose is to help students and working professionals craft perfect prompts for a vast ecosystem of over 1000 AI tools. When a user tells you their goal, your task is to:
 
 1. *Craft an Optimal Prompt:* Generate a clear, concise, and effective prompt that the user can copy and paste into a relevant AI tool.
@@ -49,16 +56,18 @@ export default async function handler(req: Request): Promise<Response> {
 You must respond in the specified JSON format.`;
 
   try {
+    // Parse JSON body from the request
     const { userInput } = await req.json();
 
-    if (!userInput || typeof userInput !== 'string') {
-      return new Response(JSON.stringify({ error: 'Invalid userInput provided.' }), {
+    if (!userInput || typeof userInput !== "string") {
+      return new Response(JSON.stringify({ error: "Invalid userInput provided." }), {
         status: 400,
         headers,
       });
     }
 
     let response;
+    // Call the API inside a nested try-catch to handle API errors separately
     try {
       response = await openai.chat.completions.create({
         model: "sonar-pro",
@@ -71,14 +80,57 @@ You must respond in the specified JSON format.`;
         top_p: 0.95,
       });
     } catch (apiError) {
-      const apiErrorMessage = apiError instanceof Error ? apiError.message : "Unknown API error.";
-      return new Response(JSON.stringify({ error: `OpenAI API error: ${apiErrorMessage}` }), {
+      const apiErrorMessage =
+        apiError instanceof Error ? apiError.message : "Unknown API error.";
+      return new Response(
+        JSON.stringify({ error: `OpenAI API error: ${apiErrorMessage}` }),
+        { status: 500, headers }
+      );
+    }
+
+    // Validate the structure of the API response
+    if (!response.choices || !response.choices[0]?.message?.content) {
+      return new Response(JSON.stringify({ error: "Invalid response from OpenAI API." }), {
         status: 500,
         headers,
       });
     }
 
-    if (!response.choices || !response.choices[0]?.message?.content) {
-      return new Response(JSON.stringify({ error: "Invalid response from OpenAI API." }), {
+    const messageContent = response.choices[0].message.content;
+
+    // Remove any leading/trailing quotes or backticks
+    const cleanContent = messageContent.replace(/^['"`]+|['"`]+$/g, "");
+
+    let jsonData;
+    try {
+      jsonData = JSON.parse(cleanContent);
+    } catch (parseError) {
+      return new Response(
+        JSON.stringify({
+          error: "Upstream API did not return valid JSON data.",
+          details:
+            parseError instanceof Error ? parseError.message : String(parseError),
+          rawContent: cleanContent, // optional, remove in production for security
+        }),
+        { status: 500, headers }
+      );
+    }
+
+    // Return the parsed JSON data as a string
+    return new Response(JSON.stringify(jsonData), {
+      status: 200,
+      headers,
+    });
+  } catch (error) {
+    console.error("Error in serverless function:", error);
+    const errorMessage =
+      error instanceof Error ? error.message : "An unknown error occurred.";
+    return new Response(
+      JSON.stringify({ error: `Server error: ${errorMessage}` }),
+      {
         status: 500,
         headers,
+      }
+    );
+  }
+}
